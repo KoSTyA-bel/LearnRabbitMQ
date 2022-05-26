@@ -1,23 +1,56 @@
-﻿List<Task> tasks = new();
-var recive1 = new Recive.Topic.Recive();
-recive1.Name = "First";
-recive1.Topics.Add("#");
-tasks.Add(Task.Factory.StartNew(() => recive1.ReciveMessage()));
+﻿using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System.Text;
 
-var recive2 = new Recive.Topic.Recive();
-recive2.Name = "Secons";
-recive2.Topics.Add("kern.*");
-tasks.Add(Task.Factory.StartNew(() => recive2.ReciveMessage()));
+var factory = new ConnectionFactory() {
+    HostName = "127.0.0.1",
+    Port = 5672,
+    UserName = "guest",
+    Password = "guest" };
+using (var connection = factory.CreateConnection())
+using (var channel = connection.CreateModel())
+{
+    channel.QueueDeclare(queue: "rpc_queue", durable: false,
+      exclusive: false, autoDelete: false, arguments: null);
+    channel.BasicQos(0, 1, false);
+    var consumer = new EventingBasicConsumer(channel);
+    channel.BasicConsume(queue: "rpc_queue",
+      autoAck: false, consumer: consumer);
+    Console.WriteLine(" [x] Awaiting RPC requests");
 
-var recive3 = new Recive.Topic.Recive();
-recive3.Name = "Third";
-recive3.Topics.Add("*.critical");
-tasks.Add(Task.Factory.StartNew(() => recive3.ReciveMessage()));
+    consumer.Received += (model, ea) =>
+    {
+        string response = null;
 
-var recive4 = new Recive.Topic.Recive();
-recive4.Name = "Fourth";
-recive4.Topics.Add("kern.*");
-recive4.Topics.Add("*.critical");
-tasks.Add(Task.Factory.StartNew(() => recive4.ReciveMessage()));
+        var body = ea.Body.ToArray();
+        var props = ea.BasicProperties;
+        var replyProps = channel.CreateBasicProperties();
+        replyProps.CorrelationId = props.CorrelationId;
 
-Console.ReadLine();
+        try
+        {
+            var message = Encoding.UTF8.GetString(body);
+            int n = int.Parse(message);
+            Console.WriteLine(" [.] Fact({0})", message);
+            response = Fact(n).ToString();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(" [.] " + e.Message);
+            response = "";
+        }
+        finally
+        {
+            var responseBytes = Encoding.UTF8.GetBytes(response);
+            channel.BasicPublish(exchange: "", routingKey: props.ReplyTo,
+              basicProperties: replyProps, body: responseBytes);
+            channel.BasicAck(deliveryTag: ea.DeliveryTag,
+              multiple: false);
+        }
+    };
+
+    Console.WriteLine(" Press [enter] to exit.");
+    Console.ReadLine();
+
+    static int Fact(int n) => n == 0 ? 1 : n * Fact(n - 1);
+}

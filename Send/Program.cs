@@ -1,5 +1,6 @@
-﻿var send = new Send.Topic.Send();
-Console.ReadLine();
-send.Routing = "kern.critical";
-send.SendMessage("HELLO");
+﻿var client = new Send.RPC.RpcClient();
+client.RoutingKey = "rpc_queue";
+var res = client.Call("25");
+Console.WriteLine(res);
+client.Close();
 Console.ReadLine();
